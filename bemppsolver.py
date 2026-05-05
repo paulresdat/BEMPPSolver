@@ -50,6 +50,7 @@ class SimulationConfig:
     bempp_cl.api.BOUNDARY_OPERATOR_DEVICE_TYPE = "cpu"
     bempp_cl.api.POTENTIAL_OPERATOR_DEVICE_TYPE = "cpu"
     bempp_cl.api.DEFAULT_PRECISION = 'single'
+    bempp_cl.api.DEFAULT_DEVICE_INTERFACE = 'numba'
 
 # Global instance for easy configuration editing
 CONFIG = SimulationConfig(
@@ -407,10 +408,10 @@ class HornBEMSolver:
 
     def _evaluate_field(self, points, k, dirichlet_fun, neumann_fun, omega):
         slp_pot = bempp_cl.api.operators.potential.helmholtz.single_layer(
-            self.dp0_space, points, k, device_interface="opencl"
+            self.dp0_space, points, k, # device_interface="opencl"
         )
         dlp_pot = bempp_cl.api.operators.potential.helmholtz.double_layer(
-            self.p1_space, points, k, device_interface="opencl"
+            self.p1_space, points, k, # device_interface="opencl"
         )
 
         p_field = (dlp_pot * dirichlet_fun - slp_pot * neumann_fun).ravel()
