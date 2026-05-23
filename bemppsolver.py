@@ -38,7 +38,7 @@ class SimulationConfig:
     freq_min: float = 200.0
     freq_max: float = 20000.0
     freq_count: int = 72
-    tag_throat: int = 2             # Mesh physical tag index for the disc representing the compression driver
+    tag_throat: int = 6             # Mesh physical tag index for the disc representing the compression driver
     scale_factor: float = 0.001     # Mesh should be scaled to mm
     use_burton_miller: bool = True  # Use Burton-Miller formulation to mitigate fictitious resonances
     workers: int = 3
@@ -279,6 +279,10 @@ class HornBEMSolver:
         self.on_axis_idx = int(np.argmin(np.abs(self.polar_angles_deg)))
 
     def solve_sweep(self) -> Tuple[list, np.ndarray]:
+        # What's interesting about this piece of code is that it's using a logarithmic function to
+        # create a sequence of frequencies to test by RATIO, not hz count.  To best measure
+        # frequency response, as the octaves go up, the number of htz to jump to also go up.
+        # This is best modeled by a logarithmic function.
         frequencies = np.logspace(
             np.log10(self.cfg.freq_min),
             np.log10(self.cfg.freq_max),
