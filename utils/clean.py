@@ -46,7 +46,7 @@ class MeshArgs(object):
 
 
 class MeshioStatistic(object):
-    def __init__(self, mesh_name: str):
+    def __init__(self):
         pass
 
     def stats(self, mesh: meshio.Mesh, area_tolerance: float) -> Tuple[str, npt.NDArray[Any], npt.NDArray[Any], MeshStats]:
@@ -260,8 +260,6 @@ class CleanMesh(object):
     def clean_mesh(
         self, 
         mesh: meshio.Mesh, 
-        merge_tol: float, 
-        area_tol: float
     ) -> Tuple[meshio.Mesh, Dict[str, int], MeshStats, MeshStats]:
         conf = self.config
         mesh = meshio.read(conf.dirty_mesh_input)
@@ -270,7 +268,7 @@ class CleanMesh(object):
         cell_data = self.__extract_triangle_cell_data(mesh, tri_key)
 
         # 1) Merge near-coincident points
-        rep = self.__spatial_hash_merge(points, merge_tol)
+        rep = self.__spatial_hash_merge(points, conf.merge_tolerance)
         unique_reps, inverse = np.unique(rep, return_inverse=True)
         points_merged = points[unique_reps]
         triangles_merged = inverse[triangles]
@@ -278,7 +276,7 @@ class CleanMesh(object):
         merged_vertices = len(points) - len(points_merged)
 
         # 2) Remove degenerate faces
-        deg_mask = self.meshStat.degenerate_mask(points_merged, triangles_merged, area_tol)
+        deg_mask = self.meshStat.degenerate_mask(points_merged, triangles_merged, conf.area_tolerance)
         keep = ~deg_mask
         triangles_clean = triangles_merged[keep]
         cell_data_clean = {name: arr[keep] for name, arr in cell_data.items()}
@@ -299,7 +297,7 @@ class CleanMesh(object):
             field_data=mesh.field_data,
         )
 
-        stats_after = self.meshStat.mesh_stats(points_clean, triangles_clean, area_tol)
+        stats_after = self.meshStat.mesh_stats(points_clean, triangles_clean, conf.area_tolerance)
 
         changes = {
             "merged_vertices": int(merged_vertices),

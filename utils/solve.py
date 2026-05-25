@@ -1,30 +1,15 @@
-"""
-Simulates radiation of a freestanding loudspeaker using the Boundary Element Method (BEM)
-via the Bempp-cl library.
-
-- Requires a mesh file with two surface groups representing a rigid enclosure and a driven disc
-- Outputs normalized horizontal and vertical polar SPL around the device
-- Outputs the real + imaginary acoustic impedance as well.
-
-"""
-
-import argparse
-import multiprocessing as mp
-import os
-import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from utils.log import Log
+import json
 import bempp_cl.api
-import meshio
 import numpy as np
-import warnings
-from pyopencl import CompilerWarning
-warnings.filterwarnings("ignore", category=CompilerWarning)
+import meshio
+import os
+import multiprocessing as mp
 
-# ==========================================
-# Configuration
-# ==========================================
+
 @dataclass
 class SimulationConfig:
     mesh_file: str
@@ -38,128 +23,46 @@ class SimulationConfig:
     freq_min: float = 200.0
     freq_max: float = 20000.0
     freq_count: int = 72
-    tag_throat: int = 2             # Mesh physical tag index for the disc representing the compression driver
+    tag_throat: int = 6             # Mesh physical tag index for the disc representing the compression driver
     scale_factor: float = 0.001     # Mesh should be scaled to mm
     use_burton_miller: bool = True  # Use Burton-Miller formulation to mitigate fictitious resonances
     workers: int = 3
 
+    def __init__(self, args):
+        if args:
+            self.mesh_file = args.clean_mesh_output
+            self.sound_speed = args.sound_speed
+            self.rho = args.rho
+            self.distance = args.distance
+            self.observation_axial_offset_m = args.observation_axial_offset_m
+            self.polar_angle_step_deg = args.polar_angle_step_deg
+            self.polar_angle_min_deg = args.polar_angle_min_deg
+            self.polar_angle_max_deg = args.polar_angle_max_deg
+            self.freq_min = args.freq_min
+            self.freq_max = args.freq_max
+            self.freq_count = args.freq_count
+            self.tag_throat = args.tag_throat
+            self.scale_factor = args.scale_factor
+            self.use_burton_miller = args.use_burton_miller
+            self.workers = args.workers
+            # BEMPP Device Configuration, may need to put these somewhere else
+            bempp_cl.api.BOUNDARY_OPERATOR_DEVICE_TYPE = "cpu"
+            bempp_cl.api.POTENTIAL_OPERATOR_DEVICE_TYPE = "cpu"
+            bempp_cl.api.DEFAULT_PRECISION = 'single'
+            bempp_cl.api.DEFAULT_DEVICE_INTERFACE = 'numba'
+
+    def __str__(self):
+        return json.dumps(self.__dict__)
+
     # Output controls
-    output_npz_base_path: str = "pressure_data"
+    # output_npz_base_path: str = "pressure_data"
 
-    # BEMPP Device Configuration
-    bempp_cl.api.BOUNDARY_OPERATOR_DEVICE_TYPE = "cpu"
-    bempp_cl.api.POTENTIAL_OPERATOR_DEVICE_TYPE = "cpu"
-    bempp_cl.api.DEFAULT_PRECISION = 'single'
-    bempp_cl.api.DEFAULT_DEVICE_INTERFACE = 'numba'
-
-# Global instance for easy configuration editing
-CONFIG = SimulationConfig(
-    mesh_file="samplemesh_clean.msh",
-)
-
-
-def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a BEM frequency sweep on a loudspeaker mesh.")
-    parser.add_argument(
-        "mesh_file",
-        nargs="?",
-        default=CONFIG.mesh_file,
-        help="Path to the input mesh file",
-    )
-    parser.add_argument(
-        "--output-npz-base-path",
-        default=CONFIG.output_npz_base_path,
-        help="Base path for the solver output NPZ file, without the .npz suffix",
-    )
-    parser.add_argument(
-        "--freq-min",
-        type=float,
-        default=CONFIG.freq_min,
-        help="Minimum frequency in Hz",
-    )
-    parser.add_argument(
-        "--freq-max",
-        type=float,
-        default=CONFIG.freq_max,
-        help="Maximum frequency in Hz",
-    )
-    parser.add_argument(
-        "--freq-count",
-        type=int,
-        default=CONFIG.freq_count,
-        help="Number of frequency points in the sweep",
-    )
-    parser.add_argument(
-        "--polar-angle-step-deg",
-        type=float,
-        default=CONFIG.polar_angle_step_deg,
-        help="Angular step for polar evaluation in degrees",
-    )
-    parser.add_argument(
-        "--polar-angle-min-deg",
-        type=float,
-        default=CONFIG.polar_angle_min_deg,
-        help="Minimum polar angle in degrees",
-    )
-    parser.add_argument(
-        "--polar-angle-max-deg",
-        type=float,
-        default=CONFIG.polar_angle_max_deg,
-        help="Maximum polar angle in degrees",
-    )
-    parser.add_argument(
-        "--observation-axial-offset-m",
-        type=float,
-        default=CONFIG.observation_axial_offset_m,
-        help="Shift the polar evaluation origin along +Z in meters",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=CONFIG.workers,
-        help="Number of worker processes to use for the frequency sweep",
-    )
-    return parser
-
-
-def _config_from_args(args: argparse.Namespace) -> SimulationConfig:
-    return SimulationConfig(
-        mesh_file=args.mesh_file,
-        sound_speed=CONFIG.sound_speed,
-        rho=CONFIG.rho,
-        distance=CONFIG.distance,
-        observation_axial_offset_m=args.observation_axial_offset_m,
-        polar_angle_step_deg=args.polar_angle_step_deg,
-        polar_angle_min_deg=args.polar_angle_min_deg,
-        polar_angle_max_deg=args.polar_angle_max_deg,
-        freq_min=args.freq_min,
-        freq_max=args.freq_max,
-        freq_count=args.freq_count,
-        tag_throat=CONFIG.tag_throat,
-        scale_factor=CONFIG.scale_factor,
-        use_burton_miller=CONFIG.use_burton_miller,
-        workers=args.workers,
-        output_npz_base_path=args.output_npz_base_path,
-    )
-
-
-def _split_frequencies_evenly(frequencies: np.ndarray, worker_count: int) -> List[np.ndarray]:
-    if worker_count <= 1 or len(frequencies) == 0:
-        return [frequencies]
-
-    return [chunk for chunk in np.array_split(frequencies, worker_count) if len(chunk) > 0]
-
-
-def _solve_frequency_chunk(config: SimulationConfig, frequencies: Sequence[float]):
-    solver = HornBEMSolver(config)
-    return solver.solve_frequencies(np.asarray(frequencies, dtype=float), show_progress=False)
-
-# ==========================================
-# Solver Class
-# ==========================================
 class HornBEMSolver:
-    def __init__(self, config: SimulationConfig):
+    grid: bempp_cl.api.Grid
+
+    def __init__(self, config: SimulationConfig, log: Log):
         self.cfg = config
+        self.log = log
 
         print(f"Loading mesh: {self.cfg.mesh_file}...")
         self.grid, self.physical_tags = self._load_mesh()
@@ -215,9 +118,6 @@ class HornBEMSolver:
     def _setup_driver_geometry(self):
         #Identify throat elements for impedance calculation
         # In DP0, DOFs map 1:1 to elements
-
-        print(self.physical_tags)
-        exit(0)
         self.driver_dofs = [
             i for i in range(self.dp0_space.global_dof_count) 
             if self.physical_tags[i] == self.cfg.tag_throat
@@ -455,16 +355,12 @@ class HornBEMSolver:
         print(f"Saved {base}.npz")
 
 
-if __name__ == "__main__":
-    mp.freeze_support()
-    args = _build_arg_parser().parse_args()
-    config = _config_from_args(args)
-    t_start = time.time()
-    solver = HornBEMSolver(config)
-    polar_results, imp_matrix = solver.solve_sweep()
+def _split_frequencies_evenly(frequencies: np.ndarray, worker_count: int) -> List[np.ndarray]:
+    if worker_count <= 1 or len(frequencies) == 0:
+        return [frequencies]
 
-    # Save Results
-    solver.save_outputs(polar_results, imp_matrix)
-    
-    print(f"Total Analysis Time: {time.time() - t_start:.2f}s")
-    print("Analysis Complete.")
+    return [chunk for chunk in np.array_split(frequencies, worker_count) if len(chunk) > 0]
+
+def _solve_frequency_chunk(config: SimulationConfig, frequencies: Sequence[float]):
+    solver = HornBEMSolver(config)
+    return solver.solve_frequencies(np.asarray(frequencies, dtype=float), show_progress=False)
