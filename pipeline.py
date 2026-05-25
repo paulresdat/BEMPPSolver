@@ -2,9 +2,9 @@ import os
 import argparse
 import meshio
 import time
-from utils.clean import CleanMesh, MeshArgs, MeshioStatistic
-from utils.solve import HornBEMSolver, SimulationConfig
-from utils.log import Log
+from lib.clean import CleanMesh, MeshArgs, MeshioStatistic
+from lib.solve import HornBEMSolver, SimulationConfig
+from lib.log import Log
 from contextlib import redirect_stdout, redirect_stderr
 from dataclasses import asdict
 
@@ -151,6 +151,9 @@ def main():
             log.warning("mesh still has open edges. This usually means real holes (not just unstitched seams)")
 
     if args.solve:
+        if not args.clean_mesh_output:
+            log.error("a cleaned mesh is reuired for solving")
+            exit(1)
         t_start = time.time()
         config = SimulationConfig(args)
         solver = HornBEMSolver(config, log)
