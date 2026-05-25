@@ -4,7 +4,7 @@ import meshio
 import time
 from lib.clean import CleanMesh, MeshArgs, MeshioStatistic
 from lib.solve import HornBEMSolver, SimulationConfig
-from lib.log import Log
+from utils.log import Log
 from contextlib import redirect_stdout, redirect_stderr
 from dataclasses import asdict
 

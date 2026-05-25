@@ -34,7 +34,7 @@ class Log:
     def __write(self, log: str):
         print(log)
         if self.persist:
-            logname = str(self.logname)
+            logname = str(self.logname) + ".log"
             if os.path.exists(logname):
                 with open(logname, "a") as f:
                     f.write(log + "\n")
@@ -43,7 +43,7 @@ class Log:
         self.persit = True
         if self.logname is None:
             log_loc = self.log_loc if self.log_loc else "logs/"
-            self.logname = log_loc + "/" + log_type + "-" + str(self.job_id)
-            path = Path(self.logname).resolve()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("")
+            self.logname = log_loc + "/" + log_type + "-" + str(self.job_id) + ".log"
+        path = Path(self.logname).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
