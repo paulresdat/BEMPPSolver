@@ -1,8 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any, Optional
 import meshio
+import json
 import numpy as np
+import numpy.typing as npt
 
 
 @dataclass
@@ -14,15 +16,45 @@ class MeshStats:
     duplicate_faces: int
     degenerate_faces: int
     components: int
+    def __str__(self):
+        return json.dumps(self.__dict__, sort_keys=True)
 
 
-class CleanMeshArgs(object):
-    pass
+@dataclass
+class MeshArgs(object):
+    # for stats specifically
+    mesh: str
+    # this is for the clean process
+    dirty_mesh_input: str
+    clean_mesh_output: str
+    merge_tolerance: float
+    # used for both
+    area_tolerance: float
+    is_binary: bool
+
+    def __init__(self, args: Optional[Any] = None):
+        if args is not None:
+            self.mesh = args.mesh
+            self.dirty_mesh_input = args.dirty_mesh_input
+            self.clean_mesh_output = args.clean_mesh_output
+            self.merge_tolerance = args.merge_tol
+            self.area_tolerance = args.area_tol
+            self.is_binary = args.binary
+
+    def __str__(self):
+        return json.dumps(self.__dict__)
 
 
-class CleanMesh(object):
-    def __init__(self, args: CleanMeshArgs):
+class MeshioStatistic(object):
+    def __init__(self, mesh_name: str):
         pass
+
+    def stats(self, mesh: meshio.Mesh, area_tolerance: float) -> Tuple[str, npt.NDArray[Any], npt.NDArray[Any], MeshStats]:
+        # conf = self.config
+        trikey, triangles = self.__find_triangle_block(mesh)
+        points = np.asarray(mesh.points, dtype=float)
+        stats = self.mesh_stats(points, triangles, area_tolerance) # conf.area_tolerance)
+        return (trikey, triangles, points, stats)
 
     def __find_triangle_block(self, mesh: meshio.Mesh) -> Tuple[str, np.ndarray]:
         cells_dict = mesh.cells_dict
@@ -32,14 +64,28 @@ class CleanMesh(object):
             return "triangle3", np.asarray(cells_dict["triangle3"], dtype=np.int64)
         raise ValueError("No triangle/triangle3 cell block found in mesh.")
 
+    def mesh_stats(self, points: np.ndarray, triangles: np.ndarray, area_tol: float) -> MeshStats:
+        deg_mask = self.degenerate_mask(points, triangles, area_tol)
 
-    def __extract_triangle_cell_data(self, mesh: meshio.Mesh, tri_key: str) -> Dict[str, np.ndarray]:
-        out: Dict[str, np.ndarray] = {}
-        for data_name, by_cell_type in mesh.cell_data_dict.items():
-            if tri_key in by_cell_type:
-                out[data_name] = np.asarray(by_cell_type[tri_key])
-        return out
+        sorted_faces = np.sort(triangles, axis=1)
+        unique_faces = {tuple(row) for row in sorted_faces}
+        duplicate_faces = len(sorted_faces) - len(unique_faces)
 
+        edge_count = self.__edge_counts(triangles)
+        boundary_edges = sum(1 for c in edge_count.values() if c == 1)
+        nonmanifold_edges = sum(1 for c in edge_count.values() if c > 2)
+
+        components = self.__connected_components(triangles)
+
+        return MeshStats(
+            vertices=len(points),
+            triangles=len(triangles),
+            boundary_edges=boundary_edges,
+            nonmanifold_edges=nonmanifold_edges,
+            duplicate_faces=duplicate_faces,
+            degenerate_faces=int(np.sum(deg_mask)),
+            components=components,
+        )
 
     def __edge_counts(self, triangles: np.ndarray) -> Dict[Tuple[int, int], int]:
         counts: Dict[Tuple[int, int], int] = {}
@@ -50,7 +96,6 @@ class CleanMesh(object):
                 key = (int(u), int(v))
                 counts[key] = counts.get(key, 0) + 1
         return counts
-
 
     def __connected_components(self, triangles: np.ndarray) -> int:
         if len(triangles) == 0:
@@ -91,8 +136,7 @@ class CleanMesh(object):
 
         return components
 
-
-    def __degenerate_mask(self, points: np.ndarray, triangles: np.ndarray, area_tol: float) -> np.ndarray:
+    def degenerate_mask(self, points: np.ndarray, triangles: np.ndarray, area_tol: float) -> np.ndarray:
         v0 = points[triangles[:, 0]]
         v1 = points[triangles[:, 1]]
         v2 = points[triangles[:, 2]]
@@ -103,28 +147,18 @@ class CleanMesh(object):
         return repeated_vertex | tiny_area
 
 
-    def __mesh_stats(self, points: np.ndarray, triangles: np.ndarray, area_tol: float) -> MeshStats:
-        deg_mask = self.__degenerate_mask(points, triangles, area_tol)
 
-        sorted_faces = np.sort(triangles, axis=1)
-        unique_faces = {tuple(row) for row in sorted_faces}
-        duplicate_faces = len(sorted_faces) - len(unique_faces)
+class CleanMesh(object):
+    def __init__(self, meshStat: MeshioStatistic, args: MeshArgs):
+        self.meshStat = meshStat
+        self.config = args
 
-        edge_count = self.__edge_counts(triangles)
-        boundary_edges = sum(1 for c in edge_count.values() if c == 1)
-        nonmanifold_edges = sum(1 for c in edge_count.values() if c > 2)
-
-        components = self.__connected_components(triangles)
-
-        return MeshStats(
-            vertices=len(points),
-            triangles=len(triangles),
-            boundary_edges=boundary_edges,
-            nonmanifold_edges=nonmanifold_edges,
-            duplicate_faces=duplicate_faces,
-            degenerate_faces=int(np.sum(deg_mask)),
-            components=components,
-        )
+    def __extract_triangle_cell_data(self, mesh: meshio.Mesh, tri_key: str) -> Dict[str, np.ndarray]:
+        out: Dict[str, np.ndarray] = {}
+        for data_name, by_cell_type in mesh.cell_data_dict.items():
+            if tri_key in by_cell_type:
+                out[data_name] = np.asarray(by_cell_type[tri_key])
+        return out
 
 
     def __spatial_hash_merge(self, points: np.ndarray, tol: float) -> np.ndarray:
@@ -196,7 +230,7 @@ class CleanMesh(object):
 
 
     def __remove_duplicate_faces(self, triangles: np.ndarray, cell_data: Dict[str, np.ndarray]) -> Tuple[np.ndarray, Dict[str, np.ndarray], int]:
-        seen: Dict[Tuple[int, int, int], int] = {}
+        seen: Dict[Tuple[int, ...], int] = {}
         keep_indices: List[int] = []
         removed = 0
 
@@ -223,13 +257,17 @@ class CleanMesh(object):
         triangles_compact = new_index[triangles]
         return points_compact, triangles_compact
 
+    def clean_mesh(
+        self, 
+        mesh: meshio.Mesh, 
+        merge_tol: float, 
+        area_tol: float
+    ) -> Tuple[meshio.Mesh, Dict[str, int], MeshStats, MeshStats]:
+        conf = self.config
+        mesh = meshio.read(conf.dirty_mesh_input)
+        (tri_key, triangles, points, stats_before) = self.meshStat.stats(mesh, conf.area_tolerance)
 
-    def clean_mesh(self, mesh: meshio.Mesh, merge_tol: float, area_tol: float) -> Tuple[meshio.Mesh, Dict[str, int], MeshStats, MeshStats]:
-        tri_key, triangles = self.__find_triangle_block(mesh)
-        points = np.asarray(mesh.points, dtype=float)
         cell_data = self.__extract_triangle_cell_data(mesh, tri_key)
-
-        stats_before = self.__mesh_stats(points, triangles, area_tol)
 
         # 1) Merge near-coincident points
         rep = self.__spatial_hash_merge(points, merge_tol)
@@ -240,7 +278,7 @@ class CleanMesh(object):
         merged_vertices = len(points) - len(points_merged)
 
         # 2) Remove degenerate faces
-        deg_mask = self.__degenerate_mask(points_merged, triangles_merged, area_tol)
+        deg_mask = self.meshStat.degenerate_mask(points_merged, triangles_merged, area_tol)
         keep = ~deg_mask
         triangles_clean = triangles_merged[keep]
         cell_data_clean = {name: arr[keep] for name, arr in cell_data.items()}
@@ -261,7 +299,7 @@ class CleanMesh(object):
             field_data=mesh.field_data,
         )
 
-        stats_after = self.__mesh_stats(points_clean, triangles_clean, area_tol)
+        stats_after = self.meshStat.mesh_stats(points_clean, triangles_clean, area_tol)
 
         changes = {
             "merged_vertices": int(merged_vertices),

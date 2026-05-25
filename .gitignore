@@ -4,3 +4,6 @@ pressure_data_formatted.npz
 pressure_data.npz
 samplemesh_clean.msh
 vertical_isobar.png
+
+__pycache__
+logs/
