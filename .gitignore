@@ -6,5 +6,5 @@ samplemesh_clean.msh
 vertical_isobar.png
 
 __pycache__
-logs/
-output/
+logs/*.log
+output/*.msh
