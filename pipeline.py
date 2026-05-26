@@ -4,6 +4,8 @@ import meshio
 import time
 from lib.clean import CleanMesh, MeshArgs, MeshioStatistic
 from lib.solve import HornBEMSolver, SimulationConfig
+from lib.prep import PrepConfig, VisualizationPrep
+from lib.visual import VisualizerConfig, Visualizer
 from utils.log import Log
 from contextlib import redirect_stdout, redirect_stderr
 from dataclasses import asdict
@@ -38,9 +40,34 @@ BEMPP_POTENTIAL_OPERATOR_DEVICE_TYPE: str = "cpu"
 BEMPP_DEFAULT_PRECISION: str = "single"
 BEMPP_DEFAULT_DEVICE_INTERFACE: str = "numba"
 
+# hmm
+# input_polar_npz: Path = Path("pressure_data.npz")
+# output_npz: Path = Path("pressure_data_formatted.npz")
+
+PREP_MIN_DB: float = -30.0   #minimum dB for clipping SPL data
+PREP_MAX_DB: float = 0.0     #maximum dB for clipping SPL data
+
+# visual preparation requirements
+ISOBAR_ANGLE_SAMPLES_SMOOTH: int = 250
+ISOBAR_FREQ_SAMPLES_SMOOTH: int = 500
+ISOBAR_OCTAVE_SMOOTH_FRACTION: int | float | None = 24  #fractional octave smoothing for plots
+HORIZONTAL_REFERENCE_ANGLE_DEG: float = 10              #normalization angle for horizontal plane
+VERTICAL_REFERENCE_ANGLE_DEG: float = 10                #normalization angle for vertical plane
+
+# visualization constant defaults
+ISOBAR_INTERP_ANGLE_FACTOR: int = 2
+ISOBAR_INTERP_FREQ_FACTOR: int = 3
+
+COLORBAR_TICK_STEP_DB: float = 3.0
+FIGURE_WIDTH_IN: float = 11.0
+FIGURE_HEIGHT_IN: float = 6.0
+FIGURE_DPI: int = 160
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Splux Pipeline Arguments")
+    parser = argparse.ArgumentParser(
+        description="BEMPPSolver Pipeline Arguments - There are 4 main sequences: --stats, --clean, --solve, --visualize, " \
+        "each with their own set of sub tags.  Most of them have defaults.  Console the readme and docs for more information")
     # global arguments that determine what's going to be done
     parser.add_argument("--stats", action="store_true", help="Grab some quick stats on a mesh")
     parser.add_argument("--clean", action="store_true", help="Clean/stitch a triangle .msh surface mesh for BEM.")
@@ -49,6 +76,8 @@ def main():
 
     # for all processing
     parser.add_argument("--job-id", action="store", help="The job id for output -- for machine consumption and artifact naming")
+    # thinking about this, seems intuitive
+    # parser.add_argument("--output-dir", action="store", help="")
 
     # stats related arguments
     parser.add_argument("--mesh", action="store", help="Mesh for analysis")
@@ -103,7 +132,88 @@ def main():
     parser.add_argument("--bempp-default-precision", action="store", default=BEMPP_DEFAULT_PRECISION, help="")
     parser.add_argument("--bempp-default-device-interface", action="store", default=BEMPP_DEFAULT_DEVICE_INTERFACE, help="")
 
+    parser.add_argument("--solution-output", action="store", help="The solved data (does not need extension specified)")
+
+
     # preparation and visualization related arguments
+    parser.add_argument("--input-polar-npz", action="store", help="Path to the input solver NPZ file",)
+    parser.add_argument("--output-npz", action="store", help="Path to the output formatted NPZ file",)
+
+    parser.add_argument(
+        "--min-db",
+        type=float,
+        default=PREP_MIN_DB,
+        help="Minimum dB clipping value",
+    )
+    parser.add_argument(
+        "--max-db",
+        type=float,
+        default=PREP_MAX_DB,
+        help="Maximum dB clipping value",
+    )
+    parser.add_argument(
+        "--isobar-angle-samples-smooth",
+        type=int,
+        default=ISOBAR_ANGLE_SAMPLES_SMOOTH,
+        help="Number of smoothed angular samples for isobar interpolation",
+    )
+    parser.add_argument(
+        "--isobar-freq-samples-smooth",
+        type=int,
+        default=ISOBAR_FREQ_SAMPLES_SMOOTH,
+        help="Number of smoothed frequency samples for isobar interpolation",
+    )
+    parser.add_argument(
+        "--isobar-octave-smooth-fraction",
+        type=float,
+        default=ISOBAR_OCTAVE_SMOOTH_FRACTION,
+        help="Fractional-octave smoothing denominator; use 0 to disable",
+    )
+    parser.add_argument(
+        "--horizontal-reference-angle-deg",
+        type=float,
+        default=HORIZONTAL_REFERENCE_ANGLE_DEG,
+        help="Horizontal reference angle for normalization",
+    )
+    parser.add_argument(
+        "--vertical-reference-angle-deg",
+        type=float,
+        default=VERTICAL_REFERENCE_ANGLE_DEG,
+        help="Vertical reference angle for normalization",
+    )
+
+    # parser.add_argument(
+    #     "input_npz",
+    #     nargs="?",
+    #     type=Path,
+    #     default=VisualizerConfig.input_npz,
+    #     help="Path to pressure_data_formatted.npz",
+    # )
+    # parser.add_argument(
+    #     "--output-horizontal-png",
+    #     type=Path,
+    #     default=VisualizerConfig.output_horizontal_png,
+    #     help="Output path for horizontal isobar plot PNG",
+    # )
+    # parser.add_argument(
+    #     "--output-vertical-png",
+    #     type=Path,
+    #     default=VisualizerConfig.output_vertical_png,
+    #     help="Output path for vertical isobar plot PNG",
+    # )
+    # parser.add_argument(
+    #     "--output-impedance-png",
+    #     type=Path,
+    #     default=VisualizerConfig.output_impedance_png,
+    #     help="Output path for acoustic impedance plot PNG",
+    # )
+
+    parser.add_argument(
+        "--isobar-interp-freq-factor",
+        type=int,
+        default=ISOBAR_INTERP_FREQ_FACTOR,
+        help="Frequency interpolation factor for isobar smoothing (>=1)",
+    )
 
     args = parser.parse_args()
 
@@ -154,6 +264,9 @@ def main():
         if not args.clean_mesh_output:
             log.error("a cleaned mesh is reuired for solving")
             exit(1)
+        if not args.solution_output:
+            log.error("no solution output file specified")
+            exit(1)
         t_start = time.time()
         config = SimulationConfig(args)
         solver = HornBEMSolver(config, log)
@@ -164,11 +277,36 @@ def main():
         
         print(f"Total Analysis Time: {time.time() - t_start:.2f}s")
         print("Analysis Complete.")
-        pass
 
     if args.visualize:
+        log.persist("visual")
         # both prep and output is here
-        pass
+        if not args.input_polar_npz and not args.solution_output:
+            log.error("solution output is not specified and is required")
+            exit(1)
+        elif not args.input_polar_npz and args.solution_output:
+            args.input_polar_npz = args.solution_output
+        
+        if not os.path.exists(args.input_polar_npz + ".npz"):
+            log.error("the solution file was not generated, which means it hasn't been solved yet")
+            exit(1)
+
+        if not args.output_npz:
+            log.error("the output solution file name for prepared data has not been specified")
+            exit(1)
+        
+        conf = PrepConfig(args)
+        prep = VisualizationPrep(conf, log)
+        prep.prepare()
+
+        conf = VisualizerConfig(args)
+        vis = Visualizer(conf)
+
+        dataset = vis.load_data(args.output_npz + ".npz")
+        outputs = vis.generate_plots(dataset)
+        print("Generated PNG plots:")
+        for name, path in outputs.items():
+            print(f"  - {name}: {path}")
 
 
 class MeshioWrapper:

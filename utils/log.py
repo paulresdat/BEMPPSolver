@@ -12,7 +12,6 @@ class Log:
     def __init__(self, log_location: Optional[str] = None):
         self.job_id = None
         self.log_loc = log_location
-        pass
 
     @staticmethod
     def log(message: str, level: str = "info", job_id: Optional[str] = None, args: Optional[Any] = None) -> str:

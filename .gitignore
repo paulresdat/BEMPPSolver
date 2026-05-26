@@ -8,3 +8,5 @@ vertical_isobar.png
 __pycache__
 logs/*.log
 output/*.msh
+output/*.png
+output/*.npz

@@ -215,9 +215,6 @@ class HornBEMSolver:
     def _setup_driver_geometry(self):
         #Identify throat elements for impedance calculation
         # In DP0, DOFs map 1:1 to elements
-
-        print(self.physical_tags)
-        exit(0)
         self.driver_dofs = [
             i for i in range(self.dp0_space.global_dof_count) 
             if self.physical_tags[i] == self.cfg.tag_throat

@@ -12,6 +12,8 @@ import multiprocessing as mp
 
 @dataclass
 class SimulationConfig:
+    # These are defined as constants in the pipeline script.  They are here for verbosity
+    # but are always overruled by the constants in the main file.
     mesh_file: str
     sound_speed: float = 343.0      # m/s
     rho: float = 1.21               # kg/m^3
@@ -31,6 +33,7 @@ class SimulationConfig:
     def __init__(self, args):
         if args:
             self.mesh_file = args.clean_mesh_output
+            self.output_file = args.solution_output
             self.sound_speed = args.sound_speed
             self.rho = args.rho
             self.distance = args.distance
@@ -64,7 +67,7 @@ class HornBEMSolver:
         self.cfg = config
         self.log = log
 
-        print(f"Loading mesh: {self.cfg.mesh_file}...")
+        self.log.console("Loading mesh", {"mesh_file": self.cfg.mesh_file})
         self.grid, self.physical_tags = self._load_mesh()
         
         # Setup Spaces
@@ -137,8 +140,10 @@ class HornBEMSolver:
         # Geometry for impedance integration
         self.throat_element_areas = self.grid.volumes[self.driver_dofs]
         self.throat_p1_dofs = self.p1_space.local2global[self.driver_dofs]
-        print(f"Driven surface identified with {len(self.driver_dofs)} elements. "
-              f"Enclosure identified with {len(self.enclosure_dofs)} elements.")
+        self.log.console("driven service identified", {"elements": len(self.driver_dofs)})
+        self.log.console("Enclosure service identified", {"elements": len(self.enclosure_dofs)})
+        # print(f"Driven surface identified with {len(self.driver_dofs)} elements. "
+        #       f"Enclosure identified with {len(self.enclosure_dofs)} elements.")
 
     def _create_unit_velocity(self):
         #Create a normal velocity boundary condition with magnitude 1.0 on the throat.
@@ -205,6 +210,8 @@ class HornBEMSolver:
 
     def solve_frequencies(self, frequencies: Sequence[float], show_progress: bool = True) -> Tuple[list, np.ndarray]:
         frequencies = np.asarray(frequencies, dtype=float)
+        freq_count = len(frequencies)
+        self.log.console("total frequencies", { "count": freq_count })
 
         results_polar = []
         results_imp = []
@@ -212,8 +219,9 @@ class HornBEMSolver:
             res_h, res_v, res_z = self._solve_single_frequency(freq)
             results_polar.append((freq, res_h, res_v))
             results_imp.append(res_z)
-            if show_progress:
-                print(f"[{i+1}/{len(frequencies)}] {freq:.1f} Hz")
+            self.log.console("freq_count", { "increment": i+1, "total": freq_count })
+            # if show_progress:
+            #     print(f"[{i+1}/{len(frequencies)}] {freq:.1f} Hz")
 
         imp_matrix = np.asarray(results_imp, dtype=np.float32)
         return results_polar, imp_matrix
@@ -241,6 +249,7 @@ class HornBEMSolver:
                 polar_chunk, imp_chunk = future.result()
                 chunk_results[index] = (polar_chunk, imp_chunk)
                 completed += len(polar_chunk)
+                # this needs to be tested
                 print(f"[{completed}/{len(frequencies)}] completed worker chunk {index + 1}/{len(chunks)}")
 
         polar_results = []
@@ -291,7 +300,7 @@ class HornBEMSolver:
         # 4. Solve System
         dirichlet_fun, info = bempp_cl.api.linalg.gmres(lhs, rhs, tol=1E-3)
         if info != 0:
-            print(f"  Warning: Solver did not converge at {freq:.1f}Hz")
+            self.log.warning("Warning: Solver did not converge", { "freq": f"{freq:.1f}Hz" })
 
         # 5. Post-Processing
         z_data = self._calculate_impedance(freq, dirichlet_fun)
@@ -332,7 +341,7 @@ class HornBEMSolver:
         return horizontal_spl - on_axis_ref, vertical_spl - on_axis_ref
 
     def save_outputs(self, polar_results, imp_matrix):
-        base = self.cfg.output_npz_base_path
+        base = self.cfg.output_file # output_npz_base_path
 
         freqs = np.array([freq for freq, _, _ in polar_results], dtype=np.float32)
         horizontal_spl = np.vstack([h_spl for _, h_spl, _ in polar_results]).astype(np.float32, copy=False)
@@ -352,7 +361,7 @@ class HornBEMSolver:
             impedance_imag=z_imag,
             observation_axial_offset_m=np.float32(self.cfg.observation_axial_offset_m),
         )
-        print(f"Saved {base}.npz")
+        self.log.console("Saved solved file", {"filename": f"{base}.npz"})
 
 
 def _split_frequencies_evenly(frequencies: np.ndarray, worker_count: int) -> List[np.ndarray]:

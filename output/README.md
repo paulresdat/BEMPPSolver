@@ -1,0 +1,1 @@
+# Default directory for job artifacts, programmatically defined and consumed
