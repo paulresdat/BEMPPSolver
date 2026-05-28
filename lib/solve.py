@@ -12,8 +12,9 @@ import multiprocessing as mp
 
 @dataclass
 class SimulationConfig:
-    # These are defined as constants in the pipeline script.  They are here for verbosity
-    # but are always overruled by the constants in the main file.
+    # These are defined as constants in the pipeline script.  They are here for posterity
+    # but are always overruled by the constants in the main file.  Do not change them, they represent
+    # a starting point.
     mesh_file: str
     sound_speed: float = 343.0      # m/s
     rho: float = 1.21               # kg/m^3

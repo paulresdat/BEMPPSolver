@@ -182,38 +182,17 @@ def main():
         help="Vertical reference angle for normalization",
     )
 
-    # parser.add_argument(
-    #     "input_npz",
-    #     nargs="?",
-    #     type=Path,
-    #     default=VisualizerConfig.input_npz,
-    #     help="Path to pressure_data_formatted.npz",
-    # )
-    # parser.add_argument(
-    #     "--output-horizontal-png",
-    #     type=Path,
-    #     default=VisualizerConfig.output_horizontal_png,
-    #     help="Output path for horizontal isobar plot PNG",
-    # )
-    # parser.add_argument(
-    #     "--output-vertical-png",
-    #     type=Path,
-    #     default=VisualizerConfig.output_vertical_png,
-    #     help="Output path for vertical isobar plot PNG",
-    # )
-    # parser.add_argument(
-    #     "--output-impedance-png",
-    #     type=Path,
-    #     default=VisualizerConfig.output_impedance_png,
-    #     help="Output path for acoustic impedance plot PNG",
-    # )
-
     parser.add_argument(
         "--isobar-interp-freq-factor",
         type=int,
         default=ISOBAR_INTERP_FREQ_FACTOR,
         help="Frequency interpolation factor for isobar smoothing (>=1)",
     )
+
+
+    parser.add_argument("--output-horizontal-isobar", type=str, action="store", help="")
+    parser.add_argument("--output-vertical-isobar", type=str, action="store", help="")
+    parser.add_argument("--output-acoustic-impedance", type=str, action="store", help="")
 
     args = parser.parse_args()
 
@@ -294,7 +273,19 @@ def main():
         if not args.output_npz:
             log.error("the output solution file name for prepared data has not been specified")
             exit(1)
-        
+
+        if not args.output_horizontal_isobar:
+            log.error("horizontal isobar output filename is required")
+            exit(1)
+
+        if not args.output_vertical_isobar:
+            log.error("vertical isobar output filename is required")
+            exit(1)
+
+        if not args.output_acoustic_impedance:
+            log.error("impedance acoustic output filename is required")
+            exit(1)
+
         conf = PrepConfig(args)
         prep = VisualizationPrep(conf, log)
         prep.prepare()
