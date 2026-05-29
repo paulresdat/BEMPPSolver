@@ -3,35 +3,40 @@ import os
 from typing import Any, Optional
 from datetime import datetime
 from pathlib import Path
+from utils.signalr import Signalr
 
 class Log:
     persist_log: bool = False
     logname: Optional[str] = None
     job_id: Optional[str] = None
     log_loc: Optional[str] = None
-    def __init__(self, log_location: Optional[str] = None):
+    signalr: Optional[Signalr]
+    def __init__(self, log_location: Optional[str] = None, signalr: Optional[Signalr] = None):
         self.job_id = None
         self.log_loc = log_location
+        self.signalr = signalr
 
     @staticmethod
-    def log(message: str, level: str = "info", job_id: Optional[str] = None, args: Optional[Any] = None) -> str:
+    def log(message_type: str, message: str, level: str = "info", job_id: Optional[str] = None, args: Optional[Any] = None) -> str:
         timestamp = datetime.now().astimezone().isoformat()
-        return json.dumps({"level": level, "job_id": job_id, "timestamp": timestamp, "message": message, "args": args})
+        return json.dumps({"level": level, "job_id": job_id, "timestamp": timestamp, "message_type": message_type, "message": message, "args": args})
 
-    def console(self, message: str, args: Optional[Any] = None):
-        log = self.log(message, "info", self.job_id, args)
+    def console(self, message_type: str, message: str, args: Optional[Any] = None):
+        log = self.log(message, "info", message_type, self.job_id, args)
         self.__write(log)
     
-    def error(self, message: str, args: Optional[Any] = None):
-        log = self.log(message, "error", self.job_id, args)
+    def error(self, message_type: str, message: str, args: Optional[Any] = None):
+        log = self.log(message, "error", message_type, self.job_id, args)
         self.__write(log)
 
-    def warning(self, message: str, args: Optional[Any] = None):
-        log = self.log(message, "warning", self.job_id, args)
+    def warning(self, message_type: str, message: str, args: Optional[Any] = None):
+        log = self.log(message, "warning", message_type, self.job_id, args)
         self.__write(log)
 
     def __write(self, log: str):
         print(log)
+        if self.signalr:
+            self.signalr.send_message(log)
         if self.persist:
             logname = str(self.logname) + ".log"
             if os.path.exists(logname):

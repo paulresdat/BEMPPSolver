@@ -45,9 +45,9 @@ class VisualizerConfig:
         # self.figure_dpi = args.figure_dpi
         # self.isobar_interp_angle_factor = args.isobar_interp_angle_factor
         self.isobar_interp_freq_factor = args.isobar_interp_freq_factor
-        self.output_horizontal_png = Path(args.horizontal_isobar_output) # Path("output/horizontal_isobar.png")
-        self.output_vertical_png = Path(args.vertical_isobar_output)     # Path("output/vertical_isobar.png")
-        self.output_impedance_png = Path(args.acoustic_impedance_output) # Path("output/acoustic_impedance.png")
+        self.output_horizontal_png = Path(args.output_horizontal_isobar) # Path("output/horizontal_isobar.png")
+        self.output_vertical_png = Path(args.output_vertical_isobar)     # Path("output/vertical_isobar.png")
+        self.output_impedance_png = Path(args.output_acoustic_impedance) # Path("output/acoustic_impedance.png")
 
 
 class Visualizer(object):

@@ -7,6 +7,7 @@ from lib.solve import HornBEMSolver, SimulationConfig
 from lib.prep import PrepConfig, VisualizationPrep
 from lib.visual import VisualizerConfig, Visualizer
 from utils.log import Log
+from utils.signalr import Signalr
 from contextlib import redirect_stdout, redirect_stderr
 from dataclasses import asdict
 
@@ -194,57 +195,64 @@ def main():
     parser.add_argument("--output-vertical-isobar", type=str, action="store", help="")
     parser.add_argument("--output-acoustic-impedance", type=str, action="store", help="")
 
+    # script configuration specifics
+    parser.add_argument("--hub-connection", type=str, default="http://localhost:5000/mainhub")
     args = parser.parse_args()
 
-    log = Log()
+    signalr = None
+    if args.hub_connection:
+        signalr = Signalr()
+        signalr.start(args.hub_connection)
+
+    log = Log(signalr=signalr)
 
     if not args.job_id:
-        log.error("error: job id not set")
+        log.error("fatal", "error: job id not set")
         exit(1)
     else:
         log.job_id = args.job_id
-        log.console("running job")
+        log.console("log", "running job")
 
     if not args.clean and not args.solve and not args.visualize and not args.stats:
-        log.error("error: arguments not set")
+        log.error("fatal", "error: arguments not set")
         exit(1)
 
     if args.stats:
         log.persist("stats")
         if not args.mesh:
-            log.error("mesh /loc/name.msh is required")
+            log.error("fatal", "mesh /loc/name.msh is required")
             exit(1)
         # time to clean
         meshStat = MeshioStatistic()
         meshArgs = MeshArgs(args)
         mesh = MeshioWrapper.read(meshArgs.mesh)
         _, _, _, stats = meshStat.stats(mesh, meshArgs.area_tolerance)
-        log.console("mesh stats", asdict(stats))
+        log.console("status", "mesh stats", asdict(stats))
 
     if args.clean:
         log.persist("clean")
         # time to clean
         meshArgs = MeshArgs(args)
         if not meshArgs.dirty_mesh_input:
-            log.error("The input mesh for cleaning up is required")
+            log.error("fatal", "The input mesh for cleaning up is required")
             exit(1)
         mesh = MeshioWrapper.read(meshArgs.dirty_mesh_input)
         clean = CleanMesh(MeshioStatistic(), meshArgs)
         out_mesh, changes, stats_before, stats_after = clean.clean_mesh(mesh)
-        log.console("clean results", {"changes": changes, "stats_before": asdict(stats_before), "stats_after": asdict(stats_after)})
+        log.console("status", "clean results", {"changes": changes, "stats_before": asdict(stats_before), "stats_after": asdict(stats_after)})
 
         MeshioWrapper.write(args.clean_mesh_output, out_mesh, args.output_mesh_type, args.binary)
-        log.console("Wrote cleaned mesh: ", {"mesh": args.clean_mesh_output})
+        log.console("status", "Wrote cleaned mesh: ", {"mesh": args.clean_mesh_output})
 
         if stats_after.boundary_edges > 0:
-            log.warning("mesh still has open edges. This usually means real holes (not just unstitched seams)")
+            log.warning("log", "mesh still has open edges. This usually means real holes (not just unstitched seams)")
 
     if args.solve:
         if not args.clean_mesh_output:
-            log.error("a cleaned mesh is reuired for solving")
+            log.error("fatal", "a cleaned mesh is reuired for solving")
             exit(1)
         if not args.solution_output:
-            log.error("no solution output file specified")
+            log.error("fatal", "no solution output file specified")
             exit(1)
         t_start = time.time()
         config = SimulationConfig(args)
@@ -261,29 +269,29 @@ def main():
         log.persist("visual")
         # both prep and output is here
         if not args.input_polar_npz and not args.solution_output:
-            log.error("solution output is not specified and is required")
+            log.error("fatal", "solution output is not specified and is required")
             exit(1)
         elif not args.input_polar_npz and args.solution_output:
             args.input_polar_npz = args.solution_output
         
         if not os.path.exists(args.input_polar_npz + ".npz"):
-            log.error("the solution file was not generated, which means it hasn't been solved yet")
+            log.error("fatal", "the solution file was not generated, which means it hasn't been solved yet")
             exit(1)
 
         if not args.output_npz:
-            log.error("the output solution file name for prepared data has not been specified")
+            log.error("fatal", "the output solution file name for prepared data has not been specified")
             exit(1)
 
         if not args.output_horizontal_isobar:
-            log.error("horizontal isobar output filename is required")
+            log.error("fatal", "horizontal isobar output filename is required")
             exit(1)
 
         if not args.output_vertical_isobar:
-            log.error("vertical isobar output filename is required")
+            log.error("fatal", "vertical isobar output filename is required")
             exit(1)
 
         if not args.output_acoustic_impedance:
-            log.error("impedance acoustic output filename is required")
+            log.error("fatal", "impedance acoustic output filename is required")
             exit(1)
 
         conf = PrepConfig(args)

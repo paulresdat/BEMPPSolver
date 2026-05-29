@@ -68,7 +68,7 @@ class HornBEMSolver:
         self.cfg = config
         self.log = log
 
-        self.log.console("Loading mesh", {"mesh_file": self.cfg.mesh_file})
+        self.log.console("status", "Loading mesh", {"mesh_file": self.cfg.mesh_file})
         self.grid, self.physical_tags = self._load_mesh()
         
         # Setup Spaces
@@ -141,8 +141,8 @@ class HornBEMSolver:
         # Geometry for impedance integration
         self.throat_element_areas = self.grid.volumes[self.driver_dofs]
         self.throat_p1_dofs = self.p1_space.local2global[self.driver_dofs]
-        self.log.console("driven service identified", {"elements": len(self.driver_dofs)})
-        self.log.console("Enclosure service identified", {"elements": len(self.enclosure_dofs)})
+        self.log.console("status", "driven service identified", {"elements": len(self.driver_dofs)})
+        self.log.console("status", "Enclosure service identified", {"elements": len(self.enclosure_dofs)})
         # print(f"Driven surface identified with {len(self.driver_dofs)} elements. "
         #       f"Enclosure identified with {len(self.enclosure_dofs)} elements.")
 
@@ -212,7 +212,7 @@ class HornBEMSolver:
     def solve_frequencies(self, frequencies: Sequence[float], show_progress: bool = True) -> Tuple[list, np.ndarray]:
         frequencies = np.asarray(frequencies, dtype=float)
         freq_count = len(frequencies)
-        self.log.console("total frequencies", { "count": freq_count })
+        self.log.console("status", "total frequencies", { "count": freq_count })
 
         results_polar = []
         results_imp = []
@@ -220,7 +220,7 @@ class HornBEMSolver:
             res_h, res_v, res_z = self._solve_single_frequency(freq)
             results_polar.append((freq, res_h, res_v))
             results_imp.append(res_z)
-            self.log.console("freq_count", { "increment": i+1, "total": freq_count })
+            self.log.console("status", "freq_count", { "increment": i+1, "total": freq_count })
             # if show_progress:
             #     print(f"[{i+1}/{len(frequencies)}] {freq:.1f} Hz")
 
@@ -241,7 +241,7 @@ class HornBEMSolver:
 
         with ProcessPoolExecutor(max_workers=len(chunks), mp_context=ctx) as executor:
             futures = {
-                executor.submit(_solve_frequency_chunk, self.cfg, chunk.tolist()): index
+                executor.submit(_solve_frequency_chunk, self.cfg, chunk.tolist(), self.log): index
                 for index, chunk in enumerate(chunks)
             }
 
@@ -301,7 +301,7 @@ class HornBEMSolver:
         # 4. Solve System
         dirichlet_fun, info = bempp_cl.api.linalg.gmres(lhs, rhs, tol=1E-3)
         if info != 0:
-            self.log.warning("Warning: Solver did not converge", { "freq": f"{freq:.1f}Hz" })
+            self.log.warning("log", "Warning: Solver did not converge", { "freq": f"{freq:.1f}Hz" })
 
         # 5. Post-Processing
         z_data = self._calculate_impedance(freq, dirichlet_fun)
@@ -362,7 +362,7 @@ class HornBEMSolver:
             impedance_imag=z_imag,
             observation_axial_offset_m=np.float32(self.cfg.observation_axial_offset_m),
         )
-        self.log.console("Saved solved file", {"filename": f"{base}.npz"})
+        self.log.console("status", "solve-complete", {"filename": f"{base}.npz"})
 
 
 def _split_frequencies_evenly(frequencies: np.ndarray, worker_count: int) -> List[np.ndarray]:
@@ -371,6 +371,6 @@ def _split_frequencies_evenly(frequencies: np.ndarray, worker_count: int) -> Lis
 
     return [chunk for chunk in np.array_split(frequencies, worker_count) if len(chunk) > 0]
 
-def _solve_frequency_chunk(config: SimulationConfig, frequencies: Sequence[float]):
-    solver = HornBEMSolver(config)
+def _solve_frequency_chunk(config: SimulationConfig, frequencies: Sequence[float], log: Log):
+    solver = HornBEMSolver(config, log)
     return solver.solve_frequencies(np.asarray(frequencies, dtype=float), show_progress=False)
